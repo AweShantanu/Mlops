@@ -1,0 +1,4 @@
+[core]
+    remote = demo-mlops-123
+['remote "demo-mlops-123"']
+    url = s3://demo-mlops-123
