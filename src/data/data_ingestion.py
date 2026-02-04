@@ -90,11 +90,17 @@ def main():
                 "AWS credentials or bucket name not found in environment variables"
             )
 
+        #s3 = s3_connection.s3_operations(
+#            bucket_name=bucket_name,
+#            aws_access_key_id=aws_access_key,
+#            aws_secret_access_key=aws_secret_key,
+#       )
         s3 = s3_connection.s3_operations(
-            bucket_name=bucket_name,
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
+            bucket_name,
+            aws_access_key,
+            aws_secret_key,
         )
+
 
         df = s3.fetch_file_from_s3("data.csv")
 
