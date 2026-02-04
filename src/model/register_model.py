@@ -10,8 +10,6 @@ import warnings
 warnings.simplefilter("ignore", UserWarning)
 warnings.filterwarnings("ignore")
 
-from src.mlflow_config import setup_mlflow
-setup_mlflow()
 
 def load_model_info(file_path: str) -> dict:
     """Load the model info from a JSON file."""
@@ -60,6 +58,8 @@ def register_model(model_name: str, model_info: dict):
         raise
 
 def main():
+    from src.mlflow_config import setup_mlflow
+    setup_mlflow()
     try:
         model_info_path = 'reports/experiment_info.json'
         model_info = load_model_info(model_info_path)

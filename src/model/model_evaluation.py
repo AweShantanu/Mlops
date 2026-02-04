@@ -11,8 +11,7 @@ import os
 import tempfile
 from src.logger import logging
 
-from src.mlflow_config import setup_mlflow
-setup_mlflow()
+
 
 def load_model(file_path: str):
     """Load the trained model from a file."""
@@ -86,6 +85,8 @@ def save_model_info(run_id: str, model_path: str, file_path: str) -> None:
         raise
 
 def main():
+    from src.mlflow_config import setup_mlflow
+    setup_mlflow()
     mlflow.set_experiment("my-dvc-pipeline")
     
     with mlflow.start_run() as run:
