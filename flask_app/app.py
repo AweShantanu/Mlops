@@ -1,59 +1,56 @@
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from flask import Flask, render_template, request
 import mlflow
 import mlflow.sklearn
 import pickle
-import pandas as pd
-import numpy as np
-from prometheus_client import Counter, Histogram, generate_latest, CollectorRegistry, CONTENT_TYPE_LATEST
 import time
+import re
+import string
+import warnings
+
+from prometheus_client import (
+    Counter,
+    Histogram,
+    generate_latest,
+    CollectorRegistry,
+    CONTENT_TYPE_LATEST,
+)
+
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
-import string
-import re
-import warnings
+import nltk
+
 warnings.simplefilter("ignore", UserWarning)
 warnings.filterwarnings("ignore")
 
 # ============================================================
-# SAFE MLflow / Dagshub Initialization (NO import-time side effects)
+# SAFE MLflow / DagsHub Initialization
 # ============================================================
 def init_mlflow_if_available():
     """
-    Initialize MLflow/Dagshub only if tokens are present.
-    Safe for local, CI, Docker, production.
+    Initialize MLflow only if credentials exist.
+    Safe for local / CI / prod.
     """
     try:
         from src.mlflow_config import setup_mlflow
         setup_mlflow()
-        print("✅ MLflow initialized successfully")
+        print("✅ MLflow initialized")
     except Exception as e:
         print(f"⚠️ MLflow not initialized: {e}")
-        print("➡️ Continuing without MLflow (safe mode)")
+        print("➡️ Running in local-safe mode")
 
 # ============================================================
-# Initialize NLTK data
+# NLTK INIT
 # ============================================================
-import nltk
-
 def init_nltk():
-    try:
-        nltk.data.find('corpora/wordnet')
-    except LookupError:
-        nltk.download('wordnet', quiet=True)
-
-    try:
-        nltk.data.find('corpora/omw-1.4')
-    except LookupError:
-        nltk.download('omw-1.4', quiet=True)
-
-    try:
-        nltk.data.find('corpora/stopwords')
-    except LookupError:
-        nltk.download('stopwords', quiet=True)
+    for pkg in ["wordnet", "omw-1.4", "stopwords"]:
+        try:
+            nltk.data.find(f"corpora/{pkg}")
+        except LookupError:
+            nltk.download(pkg, quiet=True)
 
 init_nltk()
 
@@ -62,92 +59,74 @@ _stop_words = set(stopwords.words("english"))
 print("✅ NLTK initialized")
 
 # ============================================================
-# Text preprocessing helpers
+# TEXT PREPROCESSING
 # ============================================================
-def lemmatization(text):
-    return " ".join([_lemmatizer.lemmatize(word) for word in text.split()])
-
-def remove_stop_words(text):
-    return " ".join([w for w in text.split() if w not in _stop_words])
-
-def removing_numbers(text):
-    return ''.join([c for c in text if not c.isdigit()])
-
-def lower_case(text):
-    return text.lower()
-
-def removing_punctuations(text):
-    text = re.sub('[%s]' % re.escape(string.punctuation), ' ', text)
-    return re.sub('\s+', ' ', text).strip()
-
-def removing_urls(text):
-    return re.sub(r'https?://\S+|www\.\S+', '', text)
-
-def normalize_text(text):
-    text = lower_case(text)
-    text = remove_stop_words(text)
-    text = removing_numbers(text)
-    text = removing_punctuations(text)
-    text = removing_urls(text)
-    text = lemmatization(text)
-    return text
+def normalize_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"https?://\S+|www\.\S+", "", text)
+    text = "".join(c for c in text if not c.isdigit())
+    text = re.sub(f"[{re.escape(string.punctuation)}]", " ", text)
+    words = [w for w in text.split() if w not in _stop_words]
+    words = [_lemmatizer.lemmatize(w) for w in words]
+    return " ".join(words)
 
 # ============================================================
-# Flask app
+# FLASK APP
 # ============================================================
 app = Flask(__name__)
 
-# Prometheus metrics
+# ============================================================
+# PROMETHEUS METRICS
+# ============================================================
 registry = CollectorRegistry()
 
 REQUEST_COUNT = Counter(
     "app_request_count",
-    "Total number of requests",
+    "Total HTTP requests",
     ["method", "endpoint"],
-    registry=registry
+    registry=registry,
 )
 
 REQUEST_LATENCY = Histogram(
     "app_request_latency_seconds",
     "Request latency",
     ["endpoint"],
-    registry=registry
+    registry=registry,
 )
 
 PREDICTION_COUNT = Counter(
     "model_prediction_count",
-    "Prediction count",
+    "Predictions by class",
     ["prediction"],
-    registry=registry
+    registry=registry,
 )
 
 # ============================================================
-# Model loading
+# MODEL LOADING (PRODUCTION ONLY)
 # ============================================================
 MODEL_NAME = "my_model"
 
-def get_latest_model_version(model_name):
-    try:
-        client = mlflow.MlflowClient()
-        versions = client.search_model_versions(f"name='{model_name}'")
-        if versions:
-            latest = sorted(versions, key=lambda x: int(x.version), reverse=True)[0]
-            return latest.version
-    except Exception:
-        return None
+def get_production_model_version(model_name: str):
+    """
+    Returns the model version with tag env=production
+    """
+    client = mlflow.MlflowClient()
+    versions = client.search_model_versions(f"name='{model_name}'")
+
+    for mv in versions:
+        if mv.tags.get("env") == "production":
+            print(f"✅ Found PRODUCTION model version: {mv.version}")
+            return mv.version
+
+    raise RuntimeError("❌ No model found with tag env=production")
 
 def load_model_and_vectorizer():
     try:
-        model_version = get_latest_model_version(MODEL_NAME)
+        version = get_production_model_version(MODEL_NAME)
+        model_uri = f"models:/{MODEL_NAME}/{version}"
 
-        if model_version:
-            model_uri = f"models:/{MODEL_NAME}/{model_version}"
-            model = mlflow.sklearn.load_model(model_uri)
-            print(f"✅ Loaded model from MLflow: {model_uri}")
-        else:
-            with open("models/model.pkl", "rb") as f:
-                model = pickle.load(f)
-            print("⚠️ Loaded local model.pkl")
+        model = mlflow.sklearn.load_model(model_uri)
+        print(f"✅ Loaded production model: {model_uri}")
 
         with open("models/vectorizer.pkl", "rb") as f:
             vectorizer = pickle.load(f)
@@ -155,25 +134,26 @@ def load_model_and_vectorizer():
         return model, vectorizer
 
     except Exception as e:
-        print(f"❌ Failed to load model/vectorizer: {e}")
+        print(f"❌ Model loading failed: {e}")
         raise
 
 # ============================================================
-# App startup sequence
+# STARTUP SEQUENCE
 # ============================================================
 print("\n🚀 Initializing MLflow (optional)")
 init_mlflow_if_available()
 
-print("\n🚀 Loading model and vectorizer")
+print("\n🚀 Loading production model")
 model, vectorizer = load_model_and_vectorizer()
 
 # ============================================================
-# Routes
+# ROUTES
 # ============================================================
 @app.route("/")
 def home():
     REQUEST_COUNT.labels("GET", "/").inc()
     start = time.time()
+
     response = render_template("index.html", result=None)
     REQUEST_LATENCY.labels("/").observe(time.time() - start)
     return response
@@ -186,6 +166,7 @@ def predict():
     try:
         text = request.form["text"]
         cleaned = normalize_text(text)
+
         features = vectorizer.transform([cleaned])
         prediction = model.predict(features)[0]
 
@@ -207,14 +188,15 @@ def health():
     return {
         "status": "healthy",
         "model_loaded": model is not None,
-        "vectorizer_loaded": vectorizer is not None
+        "vectorizer_loaded": vectorizer is not None,
+        "model_name": MODEL_NAME,
     }, 200
 
 # ============================================================
-# Main
+# MAIN
 # ============================================================
 if __name__ == "__main__":
-    print("\n🚀 Flask app starting")
+    print("\n🚀 Flask app running")
     print("📍 http://localhost:5000")
     print("📊 /metrics")
     print("❤️  /health\n")

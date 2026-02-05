@@ -44,11 +44,24 @@ def register_model(model_name: str, model_info: dict):
         
         # Transition the model to "Staging" stage
         client = mlflow.tracking.MlflowClient()
-        client.transition_model_version_stage(
+        #client.transition_model_version_stage(
+        #    name=model_name,
+        #    version=model_version.version,
+        #    stage="Staging"
+        #)
+
+        #client.set_registered_model_alias(
+        #    name=model_name,
+        #    alias="staging",
+        #    version=model_version.version
+        #)
+        client.set_model_version_tag(
             name=model_name,
             version=model_version.version,
-            stage="Staging"
+            key="env",
+            value="staging"
         )
+
         
         logging.info(f'Model {model_name} version {model_version.version} transitioned to Staging.')
         print(f"✅ Model transitioned to Staging stage")
