@@ -140,11 +140,24 @@ def load_model_and_vectorizer():
 # ============================================================
 # STARTUP SEQUENCE
 # ============================================================
-print("\n🚀 Initializing MLflow (optional)")
-init_mlflow_if_available()
+#docker ke liye isko hata rahe
+#print("\n🚀 Initializing MLflow (optional)")
+#init_mlflow_if_available()
 
-print("\n🚀 Loading production model")
-model, vectorizer = load_model_and_vectorizer()
+#print("\n🚀 Loading production model")
+#model, vectorizer = load_model_and_vectorizer()
+#locally chalne ke liye isko le aao and niche wale ko comment out kar do
+
+print("\n🚀 Loading model from local artifacts")
+
+with open("models/model.pkl", "rb") as f:
+    model = pickle.load(f)
+
+with open("models/vectorizer.pkl", "rb") as f:
+    vectorizer = pickle.load(f)
+
+print("✅ Local model loaded successfully")
+
 
 # ============================================================
 # ROUTES
